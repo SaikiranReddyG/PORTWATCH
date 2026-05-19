@@ -1,8 +1,7 @@
 import argparse
 import sys
 from . import __version__
-from .proc import read_all  # temporary debug command for Phase 1C
-from .process import resolve_inodes
+from .snapshot import take_snapshot
 
 
 def main(argv=None):
@@ -16,13 +15,11 @@ def main(argv=None):
         return 0
 
     if args.dump:
-        # Temporary debug output for Phase 1C: print one socket per line for all protocols
-        socks = read_all()
-        # collect inodes and resolve in batch
-        inodes = {s.inode for s in socks if s.inode}
-        inode_map = resolve_inodes(inodes)
-        for s in socks:
-            p = inode_map.get(s.inode)
+        # Use snapshot builder to get combined socket+process records
+        records = take_snapshot()
+        for r in records:
+            s = r.socket
+            p = r.process
             if p is not None:
                 proc_part = f"{p.name} (pid={p.pid}, {p.exe})  uid={s.uid}({p.username})"
             else:

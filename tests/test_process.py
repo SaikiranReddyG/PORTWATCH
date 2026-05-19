@@ -8,36 +8,10 @@ from pathlib import Path
 import pytest
 
 
-def _build_fake_proc(tmp_path: Path, pids: list[dict]) -> str:
-    root = tmp_path
-    for p in pids:
-        pid_dir = root / str(p["pid"])
-        pid_dir.mkdir()
-        # comm
-        (pid_dir / "comm").write_text(p.get("comm", ""), encoding="utf8")
-        # exe (symlink) if provided
-        if "exe" in p and p["exe"] is not None:
-            try:
-                os.symlink(p["exe"], pid_dir / "exe")
-            except FileExistsError:
-                pass
-        # cmdline: write null-separated
-        cmd = p.get("cmdline", "")
-        (pid_dir / "cmdline").write_bytes(cmd.replace("\x00", "\x00").encode("utf8"))
-        # status with Uid:
-        uid = p.get("uid", 0)
-        (pid_dir / "status").write_text(f"Name:\t{p.get('comm','')}\nUid:\t{uid}\t0\t0\t0\n", encoding="utf8")
-        # fd dir
-        fd_dir = pid_dir / "fd"
-        fd_dir.mkdir()
-        for fd in p.get("fds", []):
-            target = fd["target"]
-            fd_path = fd_dir / str(fd["fd_num"])
-            os.symlink(target, fd_path)
-    return str(root)
+from tests.conftest import fake_proc  # type: ignore
 
 
-def test_build_inode_map_finds_socket_inodes(tmp_path):
+def test_build_inode_map_finds_socket_inodes(fake_proc):
     from portwatch.process import _build_inode_map
 
     pids = [
@@ -58,14 +32,14 @@ def test_build_inode_map_finds_socket_inodes(tmp_path):
             "fds": [{"fd_num": 3, "target": "socket:[333]"}, {"fd_num": 4, "target": "anon_inode:[eventfd]"}],
         },
     ]
-    root = _build_fake_proc(tmp_path, pids)
+    root = fake_proc(pids)
     m = _build_inode_map(root)
     assert m[111] == 100
     assert m[333] == 200
     assert 222 not in m
 
 
-def test_build_inode_map_skips_permission_error(tmp_path):
+def test_build_inode_map_skips_permission_error(fake_proc):
     from portwatch.process import _build_inode_map
 
     pids = [
@@ -86,7 +60,7 @@ def test_build_inode_map_skips_permission_error(tmp_path):
             "fds": [{"fd_num": 3, "target": "socket:[555]"}],
         },
     ]
-    root = Path(_build_fake_proc(tmp_path, pids))
+    root = Path(fake_proc(pids))
     # make pid 102 fd dir unreadable
     fd_dir = root / "102" / "fd"
     fd_dir.chmod(0)
@@ -98,7 +72,7 @@ def test_build_inode_map_skips_permission_error(tmp_path):
     # 555 may be missing due to permission; ensure no exception and other entries present
 
 
-def test_resolve_pid_full_info(tmp_path):
+def test_resolve_pid_full_info(fake_proc):
     from portwatch.process import _resolve_pid
 
     p = {
@@ -109,7 +83,7 @@ def test_resolve_pid_full_info(tmp_path):
         "uid": 1000,
         "fds": [],
     }
-    root = _build_fake_proc(tmp_path, [p])
+    root = fake_proc([p])
     pi = _resolve_pid(201, root)
     assert pi.pid == 201
     assert pi.name == "myp"
@@ -118,7 +92,7 @@ def test_resolve_pid_full_info(tmp_path):
     assert pi.uid == 1000
 
 
-def test_resolve_pid_missing_exe(tmp_path):
+def test_resolve_pid_missing_exe(fake_proc):
     from portwatch.process import _resolve_pid
 
     p = {
@@ -129,7 +103,7 @@ def test_resolve_pid_missing_exe(tmp_path):
         "uid": 1000,
         "fds": [],
     }
-    root = _build_fake_proc(tmp_path, [p])
+    root = fake_proc([p])
     # remove exe if present
     exe_path = Path(root) / "202" / "exe"
     if exe_path.exists():
@@ -139,11 +113,11 @@ def test_resolve_pid_missing_exe(tmp_path):
     assert pi.name == "noexe"
 
 
-def test_resolve_pid_username_fallback(tmp_path, monkeypatch):
+def test_resolve_pid_username_fallback(fake_proc, monkeypatch):
     from portwatch.process import _resolve_pid
 
     p = {"pid": 203, "comm": "u", "exe": "/bin/u", "cmdline": "u", "uid": 99999, "fds": []}
-    root = _build_fake_proc(tmp_path, [p])
+    root = fake_proc([p])
     # ensure getpwuid will fail
     import pwd as _pwd
 
@@ -152,39 +126,39 @@ def test_resolve_pid_username_fallback(tmp_path, monkeypatch):
     assert pi.username == "uid:99999"
 
 
-def test_resolve_inode_found(tmp_path):
+def test_resolve_inode_found(fake_proc):
     from portwatch.process import resolve_inode
 
     p = {"pid": 301, "comm": "s", "exe": "/bin/s", "cmdline": "s", "uid": 1000, "fds": [{"fd_num": 3, "target": "socket:[777]"}]}
-    root = _build_fake_proc(tmp_path, [p])
+    root = fake_proc([p])
     pi = resolve_inode(777, root)
     assert pi is not None
     assert pi.pid == 301
 
 
-def test_resolve_inode_not_found(tmp_path):
+def test_resolve_inode_not_found(fake_proc):
     from portwatch.process import resolve_inode
 
     p = {"pid": 302, "comm": "s2", "exe": "/bin/s2", "cmdline": "s2", "uid": 1000, "fds": []}
-    root = _build_fake_proc(tmp_path, [p])
+    root = fake_proc([p])
     pi = resolve_inode(8888, root)
     assert pi is None
 
 
-def test_resolve_inodes_batch(tmp_path):
+def test_resolve_inodes_batch(fake_proc):
     from portwatch.process import resolve_inodes
 
     p1 = {"pid": 401, "comm": "a", "exe": "/bin/a", "cmdline": "a", "uid": 1000, "fds": [{"fd_num": 3, "target": "socket:[1001]"}]}
     p2 = {"pid": 402, "comm": "b", "exe": "/bin/b", "cmdline": "b", "uid": 1000, "fds": [{"fd_num": 3, "target": "socket:[1002]"}, {"fd_num": 4, "target": "socket:[1003]"}]}
-    root = _build_fake_proc(tmp_path, [p1, p2])
+    root = fake_proc([p1, p2])
     res = resolve_inodes({1001, 1002, 1003, 9999}, root)
     assert set(res.keys()) == {1001, 1002, 1003}
 
 
-def test_cmdline_null_bytes_replaced(tmp_path):
+def test_cmdline_null_bytes_replaced(fake_proc):
     from portwatch.process import _resolve_pid
 
     p = {"pid": 501, "comm": "py", "exe": "/usr/bin/py", "cmdline": "python3\x00-m\x00http.server", "uid": 1000, "fds": []}
-    root = _build_fake_proc(tmp_path, [p])
+    root = fake_proc([p])
     pi = _resolve_pid(501, root)
     assert pi.cmdline == "python3 -m http.server"

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import logging
 from typing import List, Tuple, Callable
 import ipaddress
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -130,13 +131,14 @@ def read_udp6(path: str = "/proc/net/udp6") -> List[Socket]:
     return _parse_proc_net(path, "udp6", _parse_addr6)
 
 
-def read_all() -> List[Socket]:
+def read_all(proc_root: str = "/proc") -> List[Socket]:
     results: List[Socket] = []
+    net = os.path.join(proc_root, "net")
     for fn, proto_fn in (
-        ("/proc/net/tcp", read_tcp4),
-        ("/proc/net/tcp6", read_tcp6),
-        ("/proc/net/udp", read_udp4),
-        ("/proc/net/udp6", read_udp6),
+        (os.path.join(net, "tcp"), read_tcp4),
+        (os.path.join(net, "tcp6"), read_tcp6),
+        (os.path.join(net, "udp"), read_udp4),
+        (os.path.join(net, "udp6"), read_udp6),
     ):
         try:
             results.extend(proto_fn(fn))
