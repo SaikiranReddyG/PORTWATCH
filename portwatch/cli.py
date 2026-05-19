@@ -1,7 +1,7 @@
 import argparse
 import sys
 from . import __version__
-from .proc import read_all  # temporary debug command for Phase 1C
+from .snapshot import take_snapshot
 
 
 def main(argv=None):
@@ -15,10 +15,16 @@ def main(argv=None):
         return 0
 
     if args.dump:
-        # Temporary debug output for Phase 1C: print one socket per line for all protocols
-        socks = read_all()
-        for s in socks:
-            print(f"{s.protocol}  {s.local_ip}:{s.local_port}  {s.remote_ip}:{s.remote_port}  {s.state}  uid={s.uid}  inode={s.inode}")
+        # Use snapshot builder to get combined socket+process records
+        records = take_snapshot()
+        for r in records:
+            s = r.socket
+            p = r.process
+            if p is not None:
+                proc_part = f"{p.name} (pid={p.pid}, {p.exe})  uid={s.uid}({p.username})"
+            else:
+                proc_part = f"??? (pid=-, inode={s.inode})  uid={s.uid}"
+            print(f"{s.protocol}  {s.local_ip}:{s.local_port}  {s.remote_ip}:{s.remote_port}  {s.state}  {proc_part}")
         return 0
 
     print("not yet implemented — see PHASE files for build status")
