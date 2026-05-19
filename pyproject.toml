@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portwatch"
+version = "0.0.1"
+description = "Terminal-native port and socket visualiser for Linux (scaffold)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [ {name = "<AUTHOR_NAME>"} ]
+
+[project.scripts]
+portwatch = "portwatch.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
