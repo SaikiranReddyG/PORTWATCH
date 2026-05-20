@@ -4,7 +4,6 @@ import logging
 from . import __version__
 from .snapshot import take_snapshot
 from .loop import run_loop
-from .app import run_tui
 
 
 def main(argv=None):
@@ -39,8 +38,12 @@ def main(argv=None):
 
     if args.tui:
         try:
+            # Import run_tui lazily so `portwatch --tui` only fails when the
+            # Textual dependency is actually needed. This avoids import-time
+            # failures during `pip install -e .` when dev deps are not present.
+            from .app import run_tui
             run_tui()
-        except Exception as e:
+        except Exception:
             logging.exception("TUI failed to start")
             print("error: could not start TUI (is textual installed?)", file=sys.stderr)
             return 1
