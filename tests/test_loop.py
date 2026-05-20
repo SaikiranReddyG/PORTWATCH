@@ -47,7 +47,7 @@ def test_format_changed_line():
     prev = _make_record(local_port=80, state="LISTEN", pid=100, process_name="nginx")
     curr = _make_record(local_port=80, state="ESTABLISHED", pid=200, process_name="apache")
     line = _format_change("~", curr, prev, timestr="00:00:02")
-    assert "LISTEN→ESTABLISHED" in line and "nginx" in line and "apache" in line
+    assert "LISTEN→ESTABLISHED" in line and "nginx→apache" in line
 
 
 def test_format_unresolved_process():

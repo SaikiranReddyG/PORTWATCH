@@ -51,7 +51,8 @@ def _format_change(kind: str, record: PortRecord, prev: Optional[PortRecord] = N
     prev_pid = prev_proc.pid if prev_proc is not None else "-"
     curr_name = proc.name if proc is not None else "???"
     curr_pid = proc.pid if proc is not None else "-"
-    return f"[{ts}] ~ {s.protocol}  {s.local_ip}:{s.local_port}  {prev_state}→{s.state}  {prev_name} (pid={prev_pid}→pid={curr_pid})"
+    pname_bit = f"{prev_name}→{curr_name}" if prev_name != curr_name else curr_name
+    return f"[{ts}] ~ {s.protocol}  {s.local_ip}:{s.local_port}  {prev_state}→{s.state}  {pname_bit} (pid={prev_pid}→pid={curr_pid})"
 
 
 def _format_runtime(seconds: int) -> str:
