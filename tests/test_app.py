@@ -30,8 +30,11 @@ def test_chip_widget_pin_count_matches_records():
     records = [_record(i) for i in range(10000, 10010)]
     c = ChipWidget(records)
     s = str(c.render(120, 40))
-    for r in records:
-        assert str(r.local_port) in s
+    for port in range(10000, 10008):
+        assert str(port) in s
+    assert "+2 more" in s
+    assert "10008" not in s
+    assert "10009" not in s
 
 
 def test_status_bar_contains_version():
