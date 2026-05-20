@@ -24,12 +24,31 @@ def run_tui():
             snapshot = take_snapshot()
             chip = ChipWidget(snapshot)
             self.body = Static(chip.render())
-            await self.view.dock(self.body, edge="top")
+            # Dock/mount in a way that's compatible with multiple Textual
+            # versions: prefer `self.view.dock`, fall back to `self.dock`,
+            # finally `self.mount` which exists in modern Textual.
+            try:
+                if hasattr(self, "view") and hasattr(self.view, "dock"):
+                    await self.view.dock(self.body, edge="top")
+                elif hasattr(self, "dock"):
+                    await self.dock(self.body, edge="top")
+                else:
+                    await self.mount(self.body)
+            except Exception:
+                await self.mount(self.body)
             # status
             ts = time.strftime("%H:%M:%S")
             status = _format_status_line("0.0.1", len(snapshot), ts)
             self.footer = Static(status)
-            await self.view.dock(self.footer, edge="bottom", size=1)
+            try:
+                if hasattr(self, "view") and hasattr(self.view, "dock"):
+                    await self.view.dock(self.footer, edge="bottom", size=1)
+                elif hasattr(self, "dock"):
+                    await self.dock(self.footer, edge="bottom", size=1)
+                else:
+                    await self.mount(self.footer)
+            except Exception:
+                await self.mount(self.footer)
 
         async def on_key(self, event: events.Key) -> None:
             if event.key == "q" or (event.key == "c" and event.ctrl):
