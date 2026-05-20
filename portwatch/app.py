@@ -35,4 +35,7 @@ def run_tui():
             if event.key == "q" or (event.key == "c" and event.ctrl):
                 await self.action_quit()
 
-    PortwatchApp.run()
+    # Create and run an instance. Some Textual versions expose `run` as an
+    # instance method rather than a classmethod — instantiate to be safe.
+    app = PortwatchApp()
+    app.run()
