@@ -4,6 +4,7 @@ import logging
 from . import __version__
 from .snapshot import take_snapshot
 from .loop import run_loop
+from .app import run_tui
 
 
 def main(argv=None):
@@ -12,6 +13,7 @@ def main(argv=None):
     parser.add_argument("--dump", action="store_true", help="dump /proc/net/* sockets")
     parser.add_argument("--interval", type=float, default=2.0, help="poll interval in seconds")
     parser.add_argument("--verbose", action="store_true", help="enable debug logging on stderr")
+    parser.add_argument("--tui", action="store_true", help="launch the Textual TUI")
     args = parser.parse_args(argv)
 
     # configure logging
@@ -33,6 +35,15 @@ def main(argv=None):
             else:
                 proc_part = f"??? (pid=-, inode={s.inode})  uid={s.uid}"
             print(f"{s.protocol}  {s.local_ip}:{s.local_port}  {s.remote_ip}:{s.remote_port}  {s.state}  {proc_part}")
+        return 0
+
+    if args.tui:
+        try:
+            run_tui()
+        except Exception as e:
+            logging.exception("TUI failed to start")
+            print("error: could not start TUI (is textual installed?)", file=sys.stderr)
+            return 1
         return 0
 
     # Validate interval
