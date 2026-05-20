@@ -1,60 +1,75 @@
+"""Textual TUI application for portwatch."""
+
+from __future__ import annotations
+
 import time
-from typing import List
 
-from .snapshot import take_snapshot
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.widgets import Static
+
+from .snapshot import take_snapshot, PortRecord
 from .widgets.chip import ChipWidget
+from . import __version__
 
 
-def _format_status_line(version: str, count: int, timestr: str) -> str:
-    return f"portwatch v{version} · {count} sockets · snapshot taken at {timestr} · q to quit"
+class ChipDisplay(Static):
+    """A static widget that renders the chip diagram."""
+
+    def __init__(self, records: list[PortRecord], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._records = records
+
+    def on_mount(self) -> None:
+        size = self.app.size
+        chip = ChipWidget(self._records)
+        content = chip.render(width=size.width, height=size.height - 1)
+        self.update(content)
+
+    def on_resize(self) -> None:
+        size = self.app.size
+        chip = ChipWidget(self._records)
+        content = chip.render(width=size.width, height=size.height - 1)
+        self.update(content)
 
 
-def run_tui():
-    try:
-        from textual.app import App
-        from textual.widgets import Static
-        from textual.reactive import Reactive
-        from textual import events
-    except Exception as e:
-        raise RuntimeError("Textual is required for the TUI. Install with 'pip install textual'.") from e
+class PortwatchApp(App):
+    """portwatch TUI — microcontroller chip view."""
 
-    class PortwatchApp(App):
-        async def on_mount(self) -> None:
-            # show loading then snapshot
-            snapshot = take_snapshot()
-            chip = ChipWidget(snapshot)
-            self.body = Static(chip.render())
-            # Dock/mount in a way that's compatible with multiple Textual
-            # versions: prefer `self.view.dock`, fall back to `self.dock`,
-            # finally `self.mount` which exists in modern Textual.
-            try:
-                if hasattr(self, "view") and hasattr(self.view, "dock"):
-                    await self.view.dock(self.body, edge="top")
-                elif hasattr(self, "dock"):
-                    await self.dock(self.body, edge="top")
-                else:
-                    await self.mount(self.body)
-            except Exception:
-                await self.mount(self.body)
-            # status
-            ts = time.strftime("%H:%M:%S")
-            status = _format_status_line("0.0.1", len(snapshot), ts)
-            self.footer = Static(status)
-            try:
-                if hasattr(self, "view") and hasattr(self.view, "dock"):
-                    await self.view.dock(self.footer, edge="bottom", size=1)
-                elif hasattr(self, "dock"):
-                    await self.dock(self.footer, edge="bottom", size=1)
-                else:
-                    await self.mount(self.footer)
-            except Exception:
-                await self.mount(self.footer)
+    CSS = """
+    Screen {
+        background: $surface;
+    }
+    #chip {
+        width: 1fr;
+        height: 1fr;
+    }
+    #status {
+        dock: bottom;
+        height: 1;
+        background: $surface;
+        color: $text-muted;
+    }
+    """
 
-        async def on_key(self, event: events.Key) -> None:
-            if event.key == "q" or (event.key == "c" and event.ctrl):
-                await self.action_quit()
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "quit", "Quit"),
+    ]
 
-    # Create and run an instance. Some Textual versions expose `run` as an
-    # instance method rather than a classmethod — instantiate to be safe.
+def _format_status_line(version, count, ts):
+    return f"portwatch v{version} · {count} sockets · snapshot taken at {ts} · q to quit"
+
+    def compose(self) -> ComposeResult:
+        snapshot = take_snapshot()
+        self._snapshot = snapshot
+        yield ChipDisplay(snapshot, id="chip")
+        ts = time.strftime("%H:%M:%S")
+        status = _format_status_line(__version__, len(snapshot), ts)
+        yield Static(status, id="status")
+
+
+def run_tui() -> None:
+    """Entry point called by the CLI."""
     app = PortwatchApp()
     app.run()
