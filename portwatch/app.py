@@ -460,7 +460,9 @@ class PortwatchApp(App):
         yield Static("", id="status")
 
     def on_mount(self) -> None:
-        self.query_one("#search", Input).display = False
+        search = self.query_one("#search", Input)
+        search.display = False
+        search.disabled = True
         self.query_one("#detail", Static).display = False
         self._schedule_poll()
         self.set_interval(self.poll_interval, self._schedule_poll)
@@ -516,7 +518,10 @@ class PortwatchApp(App):
         search = self.query_one("#search", Input)
         search.display = self._search_open
         if self._search_open:
+            search.disabled = False
             search.focus()
+        else:
+            search.disabled = True
 
     def _focused_port(self) -> Optional[int]:
         chip = self.query_one("#chip", ChipDisplay)
@@ -608,7 +613,6 @@ class PortwatchApp(App):
             self._refresh_widgets()
 
     def action_quit(self) -> None:
-        print(_summary_text(self._stats))
         self.exit()
 
     # Input handling
@@ -616,10 +620,15 @@ class PortwatchApp(App):
         if event.input.id == "search":
             self._search_query = event.value
             self._search_open = False
+            event.input.disabled = True
             self._refresh_widgets()
 
 
 def run_tui(poll_interval: float = 2.0) -> None:
     """Entry point called by the CLI."""
     app = PortwatchApp(poll_interval=poll_interval)
-    app.run()
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        pass
+    print(_summary_text(app._stats), flush=True)

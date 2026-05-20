@@ -4,6 +4,7 @@ Date: 2026-05-20
 
 ## Summary
 - Implemented live polling in `portwatch/app.py` with `asyncio.to_thread` polling, diff tracking, sticky slot assignment, filtering, search state, detail panel state, and session summary printing on quit.
+- Fixed the TUI focus path so hidden search input does not steal global bindings; `q` now quits reliably, `f` cycles the filter, and the session summary prints after the app exits.
 - Updated `portwatch/cli.py` to pass `--interval` through to the TUI.
 - Added phase 2B coverage in `tests/test_app.py` for the display refresh path, sticky slot logic, expiry, filtering, and session stats.
 - Kept `portwatch/widgets/chip.py` untouched in this phase.
@@ -102,6 +103,14 @@ I captured render-based screenshots of the live TUI state rather than an interac
 
 - [Live update screenshot](phase2b_live_update.png)
 
+### 2b. Quit test
+
+Manual terminal check:
+
+```text
+q exits the app and prints the session summary after `app.run()` returns.
+```
+
 ### 3. Navigation test
 
 - [Navigation screenshot](phase2b_navigation.png)
@@ -109,6 +118,12 @@ I captured render-based screenshots of the live TUI state rather than an interac
 ### 4. Filter test
 
 - [Filter screenshot](phase2b_filter.png)
+
+Manual terminal check:
+
+```text
+Pressing `f` cycles the filter to LISTEN and the status bar shows `[filter: LISTEN]`.
+```
 
 ### 5. `portwatch --version` and `portwatch --dump`
 
