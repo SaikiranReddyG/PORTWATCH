@@ -47,3 +47,7 @@ def main(argv=None):
         logging.exception("fatal error running loop")
         return 1
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
