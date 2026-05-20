@@ -1,14 +1,22 @@
 import argparse
 import sys
+import logging
 from . import __version__
 from .snapshot import take_snapshot
+from .loop import run_loop
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="portwatch")
     parser.add_argument("--version", action="store_true", help="print version and exit")
     parser.add_argument("--dump", action="store_true", help="dump /proc/net/* sockets")
+    parser.add_argument("--interval", type=float, default=2.0, help="poll interval in seconds")
+    parser.add_argument("--verbose", action="store_true", help="enable debug logging on stderr")
     args = parser.parse_args(argv)
+
+    # configure logging
+    level = logging.DEBUG if args.verbose else logging.WARNING
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
     if args.version:
         print(f"portwatch {__version__}")
@@ -27,5 +35,15 @@ def main(argv=None):
             print(f"{s.protocol}  {s.local_ip}:{s.local_port}  {s.remote_ip}:{s.remote_port}  {s.state}  {proc_part}")
         return 0
 
-    print("not yet implemented — see PHASE files for build status")
+    # Validate interval
+    if args.interval <= 0:
+        print("error: --interval must be positive", file=sys.stderr)
+        return 2
+
+    # Run live loop
+    try:
+        run_loop(poll_interval=args.interval)
+    except Exception:
+        logging.exception("fatal error running loop")
+        return 1
     return 0
