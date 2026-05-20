@@ -42,7 +42,7 @@ def main(argv=None):
             # Textual dependency is actually needed. This avoids import-time
             # failures during `pip install -e .` when dev deps are not present.
             from .app import run_tui
-            run_tui()
+            run_tui(poll_interval=args.interval)
         except Exception:
             logging.exception("TUI failed to start")
             print("error: could not start TUI (is textual installed?)", file=sys.stderr)
