@@ -151,7 +151,7 @@ class ChipDisplay(Static):
         self._records: List[PortRecord] = list(records or [])
         self._slot_manager = SlotManager()
         self._slots: List[Optional[PortRecord]] = []
-        self._size = (100, 40)
+        self._render_size = (100, 40)
         self._focus_port: Optional[int] = None
         self._filter_mode = FilterMode.ALL
         self._search_query = ""
@@ -159,11 +159,11 @@ class ChipDisplay(Static):
         self._active_message = ""
 
     def on_mount(self) -> None:
-        self._size = (self.app.size.width, self.app.size.height)
+        self._render_size = (self.app.size.width, self.app.size.height)
         self._refresh()
 
     def on_resize(self) -> None:
-        self._size = (self.app.size.width, self.app.size.height)
+        self._render_size = (self.app.size.width, self.app.size.height)
         self._refresh()
 
     def set_context(
@@ -191,7 +191,7 @@ class ChipDisplay(Static):
         self._refresh()
 
     def _refresh(self) -> None:
-        width, height = self._size
+        width, height = self._render_size
         if width <= 0 or height <= 0:
             return
         visible = filter_records(self._records, self._filter_mode, self._search_query)
