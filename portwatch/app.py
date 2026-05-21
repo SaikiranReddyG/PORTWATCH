@@ -19,6 +19,7 @@ from . import __version__
 from .diff import diff_snapshots
 from .loop import SessionStats, _format_summary, _format_change
 from .snapshot import PortRecord, take_snapshot
+from .widgets import BladesWidget as BladeRenderer
 
 
 class FilterMode(str, Enum):
@@ -67,6 +68,22 @@ def _record_matches_search(record: PortRecord, query: str) -> bool:
 
 def filter_records(records: Sequence[PortRecord], mode: FilterMode, query: str = "") -> List[PortRecord]:
     return [record for record in records if _record_matches_filter(record, mode) and _record_matches_search(record, query)]
+
+
+def _process_group_name(record: PortRecord) -> str:
+    if record.process is None:
+        return "??? (unresolved)"
+    name = (record.process.name or "").strip()
+    return name or "??? (unresolved)"
+
+
+def _group_records_by_process_name(records: Sequence[PortRecord]) -> Dict[str, List[PortRecord]]:
+    grouped: Dict[str, List[PortRecord]] = {}
+    for record in records:
+        grouped.setdefault(_process_group_name(record), []).append(record)
+    for process_records in grouped.values():
+        process_records.sort(key=lambda record: (record.socket.local_port, record.socket.state, record.socket.remote_ip, record.socket.remote_port))
+    return grouped
 
 
 @dataclass
@@ -143,12 +160,13 @@ def _summary_text(stats: SessionStats) -> str:
     return _format_summary(stats)
 
 
-class ChipDisplay(Static):
-    """A static widget that renders the chip diagram."""
+class BladesDisplay(Static):
+    """A static widget that renders the blade layout."""
 
     def __init__(self, records: Optional[Sequence[PortRecord]] = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._records: List[PortRecord] = list(records or [])
+        self._grouped_records: Dict[str, List[PortRecord]] = _group_records_by_process_name(self._records)
         self._slot_manager = SlotManager()
         self._slots: List[Optional[PortRecord]] = []
         self._render_size = (100, 40)
@@ -195,11 +213,12 @@ class ChipDisplay(Static):
         if width <= 0 or height <= 0:
             return
         visible = filter_records(self._records, self._filter_mode, self._search_query)
-        slot_count = max(0, height - 8)
-        self._slots = self._slot_manager.update(visible, slot_count, now=time.time())
-        if self._focus_port is not None and not any(r is not None and r.socket.local_port == self._focus_port for r in self._slots):
-            self._focus_port = self._first_visible_port()
-        content = self._render_chip(width, height, visible)
+        self._slots = list(visible)
+        self._grouped_records = _group_records_by_process_name(visible)
+        first_visible = self._first_visible_port()
+        if first_visible is not None and (self._focus_port is None or not any(r is not None and r.socket.local_port == self._focus_port for r in self._slots)):
+            self._focus_port = first_visible
+        content = self._render_blades(width, height, self._grouped_records)
         try:
             self.update(content)
         except Exception:
@@ -265,138 +284,19 @@ class ChipDisplay(Static):
                 return record
         return None
 
-    def _render_chip(self, width: int, height: int, visible: Sequence[PortRecord]) -> Text:
-        # Keep the body independent from pin drawing, but the render logic lives here
-        # because chip.py is locked for this phase.
-        total_pin_rows = max(0, height - 8)
-        left_rows = (total_pin_rows + 1) // 2
-        right_rows = total_pin_rows // 2
-
-        body_width = max(34, min(42, width - 20))
-        body_left = max(0, (width - body_width) // 2)
-        body_right = body_left + body_width
-        body_top = max(0, (height - 10) // 2)
-
-        rows = [" " * width for _ in range(height)]
-
-        listens = sum(1 for record in visible if record.socket.state == "LISTEN")
-        established = sum(1 for record in visible if record.socket.state == "ESTABLISHED")
-        total = len(visible)
-        other = total - listens - established
-        user = getpass.getuser()
-
-        bar_width = body_width - 4
-        listen_width = _portion(listens, total, bar_width)
-        est_width = _portion(established, total, bar_width)
-        other_width = max(0, bar_width - listen_width - est_width)
-        bar = ("▓" * listen_width) + ("▒" * est_width) + ("░" * other_width)
-        bar = bar.ljust(bar_width, "░")
-
-        body_plain_lines = [
-            "╔" + "═" * (body_width - 2) + "╗",
-            "║" + "portwatch".center(body_width - 2) + "║",
-            "║" + " " * (body_width - 2) + "║",
-            "║" + f"{listens} LISTEN · {established} ESTABLISHED".center(body_width - 2) + "║",
-            "║" + f"{other} other · {total} total".center(body_width - 2) + "║",
-            "║" + " " * (body_width - 2) + "║",
-            "║" + bar.center(body_width - 2) + "║",
-            "║" + " " * (body_width - 2) + "║",
-            "║" + f"running as: {user}".ljust(body_width - 2) + "║",
-            "╚" + "═" * (body_width - 2) + "╝",
-        ]
-        for offset, line in enumerate(body_plain_lines):
-            row_index = body_top + offset
-            if 0 <= row_index < height:
-                rows[row_index] = _overlay(rows[row_index], body_left, line)
-
-        slot_count = len(self._slots)
-        overflow_count = max(0, len(visible) - slot_count)
-        left_visible = min(left_rows, len([record for record in self._slots[:left_rows] if record is not None]))
-        right_visible = min(right_rows, len([record for record in self._slots[left_rows:] if record is not None]))
-        left_trace_len = max(0, body_left - 10)
-        right_trace_len = max(0, width - (body_left + body_width) - 10)
-        left_trace = "[bright_black]" + "─" * left_trace_len + "┤[/bright_black]"
-        right_trace = "[bright_black]├" + "─" * right_trace_len + "[/bright_black]"
-
-        occupied_slots = [record for record in self._slots if record is not None]
-        left_ports = occupied_slots[:left_rows]
-        right_ports = occupied_slots[left_rows:left_rows + right_rows]
-
-        for i in range(left_rows):
-            row_index = body_top + 1 + i
-            if not (0 <= row_index < height):
-                continue
-            if i < len(left_ports):
-                record = left_ports[i]
-                is_focus = record.socket.local_port == self._focus_port
-                symbol, color = _pin_style(record)
-                port = _port_label(record, is_focus)
-                pin_plain = f"{port} {symbol}{left_trace_len * '─'}┤"
-            elif i == left_rows - 1 and overflow_count > 0:
-                pin_plain = f"... +{overflow_count} more"
-            else:
-                pin_plain = "····"
-            rows[row_index] = _overlay_right(rows[row_index], body_left, pin_plain)
-
-        for i in range(right_rows):
-            row_index = body_top + 1 + i
-            if not (0 <= row_index < height):
-                continue
-            if i < len(right_ports):
-                record = right_ports[i]
-                is_focus = record.socket.local_port == self._focus_port
-                symbol, color = _pin_style(record)
-                port = _port_label(record, is_focus)
-                pin_plain = f"├{right_trace_len * '─'} {symbol} {port}"
-            elif i == right_rows - 1 and overflow_count > 0:
-                pin_plain = f"... +{overflow_count} more"
-            else:
-                pin_plain = "····"
-            rows[row_index] = _overlay(rows[row_index], body_right, pin_plain)
-
-        return Text("\n".join(rows))
-
-
-def _pin_style(record: PortRecord) -> tuple[str, str]:
-    if record.socket.state == "LISTEN":
-        return "●", "green" if record.process is not None else "yellow"
-    if record.socket.state == "ESTABLISHED":
-        return "◐", "cyan"
-    return "◯", "bright_black"
-
-
-def _port_label(record: PortRecord, focused: bool) -> str:
-    port = f"{record.socket.local_port:>5}"
-    return port
-
-
-def _portion(count: int, total: int, width: int) -> int:
-    if total <= 0 or width <= 0:
-        return 0
-    return min(width, round((count / total) * width))
-
-
-def _overlay(row: str, start: int, text: str) -> str:
-    if start >= len(row):
-        return row
-    end = min(len(row), start + len(text))
-    return row[:start] + text[: end - start] + row[end:]
-
-
-def _overlay_right(row: str, end: int, text: str) -> str:
-    start = max(0, end - len(text))
-    return _overlay(row, start, text)
+    def _render_blades(self, width: int, height: int, grouped_records: Dict[str, List[PortRecord]]) -> Text:
+        return BladeRenderer(grouped_records).render(width, height)
 
 
 class PortwatchApp(App):
-    """portwatch TUI — real-time chip view."""
+    """portwatch TUI — real-time blade view."""
 
     CSS = """
     Screen {
         background: $surface;
     }
 
-    #chip {
+    #blades {
         width: 1fr;
         height: 1fr;
     }
@@ -454,7 +354,7 @@ class PortwatchApp(App):
         self._poll_in_flight = False
 
     def compose(self) -> ComposeResult:
-        yield ChipDisplay([], id="chip")
+        yield BladesDisplay([], id="blades")
         yield Static("", id="detail")
         yield Input(placeholder="Search by port or process", id="search")
         yield Static("", id="status")
@@ -501,15 +401,15 @@ class PortwatchApp(App):
         self._poll_in_flight = False
 
     def _refresh_widgets(self) -> None:
-        chip = self.query_one("#chip", ChipDisplay)
-        chip.set_context(
+        blades = self.query_one("#blades", BladesDisplay)
+        blades.set_context(
             filter_mode=self._filter_mode,
             search_query=self._search_query,
             focus_port=self._focused_port(),
             detail_port=self._detail_port(),
             message=self._status_message,
         )
-        chip.update_records(self._current_snapshot)
+        blades.update_records(self._current_snapshot)
         detail = self.query_one("#detail", Static)
         detail.display = self._detail_open
         detail.update(self._detail_renderable())
@@ -524,9 +424,9 @@ class PortwatchApp(App):
             search.disabled = True
 
     def _focused_port(self) -> Optional[int]:
-        chip = self.query_one("#chip", ChipDisplay)
-        if isinstance(chip.current_record(), PortRecord):
-            return chip.current_record().socket.local_port
+        blades = self.query_one("#blades", BladesDisplay)
+        if isinstance(blades.current_record(), PortRecord):
+            return blades.current_record().socket.local_port
         return None
 
     def _detail_port(self) -> Optional[int]:
@@ -564,24 +464,24 @@ class PortwatchApp(App):
         return Text("\n".join(lines))
 
     def _current_focused_record(self) -> Optional[PortRecord]:
-        chip = self.query_one("#chip", ChipDisplay)
-        return chip.current_record()
+        blades = self.query_one("#blades", BladesDisplay)
+        return blades.current_record()
 
     # Actions
     def action_move_up(self) -> None:
-        self.query_one("#chip", ChipDisplay).move_focus(-1)
+        self.query_one("#blades", BladesDisplay).move_focus(-1)
         self._refresh_widgets()
 
     def action_move_down(self) -> None:
-        self.query_one("#chip", ChipDisplay).move_focus(1)
+        self.query_one("#blades", BladesDisplay).move_focus(1)
         self._refresh_widgets()
 
     def action_move_left(self) -> None:
-        self.query_one("#chip", ChipDisplay).jump_column(-1)
+        self.query_one("#blades", BladesDisplay).jump_column(-1)
         self._refresh_widgets()
 
     def action_move_right(self) -> None:
-        self.query_one("#chip", ChipDisplay).jump_column(1)
+        self.query_one("#blades", BladesDisplay).jump_column(1)
         self._refresh_widgets()
 
     def action_toggle_detail(self) -> None:

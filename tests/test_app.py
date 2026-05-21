@@ -1,10 +1,10 @@
 import pytest
-from portwatch.widgets.chip import ChipWidget
+from portwatch.widgets import BladesWidget
 from portwatch.snapshot import PortRecord
 from portwatch.proc import Socket
 from portwatch.process import ProcessInfo
 from portwatch.app import (
-    ChipDisplay,
+    BladesDisplay,
     FilterMode,
     SessionStats,
     SlotManager,
@@ -19,27 +19,34 @@ def _record(port, state="LISTEN", pid=100):
     return PortRecord(socket=s, process=p)
 
 
-def test_chip_widget_renders_without_error():
+def _grouped(*records):
+    grouped = {}
+    for record in records:
+        grouped.setdefault(record.process.name, []).append(record)
+    return grouped
+
+
+def test_blades_widget_renders_without_error():
     records = [_record(80), _record(443, state="ESTABLISHED"), _record(3306, state="TIME_WAIT")]
-    c = ChipWidget(records)
+    c = BladesWidget(_grouped(*records))
     out = c.render(80, 24)
     assert out is not None
 
 
-def test_chip_widget_empty_records_shows_loading():
-    c = ChipWidget([])
+def test_blades_widget_empty_records_shows_loading():
+    c = BladesWidget({})
     out = c.render(80, 24)
     s = str(out)
     assert "LOADING" in s or "····" in s
 
 
-def test_chip_widget_pin_count_matches_records():
+def test_blades_widget_pin_count_matches_records():
     records = [_record(i) for i in range(10000, 10010)]
-    c = ChipWidget(records)
+    c = BladesWidget(_grouped(*records))
     s = str(c.render(120, 40))
     for port in range(10000, 10010):
         assert str(port) in s
-    assert "+2 more" not in s
+    assert "portwatch" in s
 
 
 def test_status_bar_contains_version():
@@ -47,8 +54,8 @@ def test_status_bar_contains_version():
     assert "v0.0.1" in s
 
 
-def test_chip_display_update_records():
-    display = ChipDisplay([_record(80)])
+def test_blades_display_update_records():
+    display = BladesDisplay([_record(80)])
     display.update_records([_record(80), _record(443, state="ESTABLISHED")])
     assert display.current_record() is not None or True
 

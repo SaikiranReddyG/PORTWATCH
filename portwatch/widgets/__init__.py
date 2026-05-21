@@ -1,3 +1,3 @@
-from .chip import ChipWidget
+from .blades import BladesWidget
 
-__all__ = ["ChipWidget"]
+__all__ = ["BladesWidget"]
