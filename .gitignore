@@ -40,6 +40,7 @@ pip-delete-this-directory.txt
 
 # Reports
 *REPORT*.md
+PHASE_*.md
 
 # Images
 *.png
