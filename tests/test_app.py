@@ -8,6 +8,7 @@ from portwatch.app import (
     FilterMode,
     SessionStats,
     SlotManager,
+    _dedupe_records_by_port,
     _format_status_line,
     filter_records,
 )
@@ -47,6 +48,16 @@ def test_blades_widget_pin_count_matches_records():
     for port in range(10000, 10010):
         assert str(port) in s
     assert "portwatch" in s
+
+
+def test_blades_widget_deduplicates_port_numbers():
+    records = [
+        _record(5353, state="TIME_WAIT", pid=1),
+        _record(5353, state="ESTABLISHED", pid=2),
+        _record(5353, state="LISTEN", pid=3),
+    ]
+    deduped = _dedupe_records_by_port(records)
+    assert [record.socket.state for record in deduped] == ["LISTEN"]
 
 
 def test_status_bar_contains_version():

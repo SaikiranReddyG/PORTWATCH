@@ -121,6 +121,14 @@ def _fit_between(left: str, right: str, width: int, fill: str = " ") -> str:
     return f"{left}{fill * remaining}{right}"
 
 
+def _header_line(width: int, count: int) -> str:
+    if width <= 0:
+        return ""
+    middle = f" {count} sockets "
+    body = _fit_between(" portwatch ", middle, max(0, width - 2), fill="─")
+    return f"┌{body}┐"[:width].ljust(width)
+
+
 def _title_line(name: str, status: str, width: int) -> str:
     if width <= 0:
         return ""
@@ -198,9 +206,7 @@ class BladesWidget:
         bar = "█" * listen_width + "▒" * est_width + "░" * other_width
         summary_line = "│" + _fit_between(bar.ljust(bar_width, "░"), f"{n_listen} LISTEN  {n_est} EST  {n_other} OTHER", inner_width - 2) + "│"
 
-        title = f"┌─ portwatch ──────────────────────────────────── {len(flat_records)} sockets ┐"
-        title = title[:width].ljust(width)
-        lines: List[str] = [title, summary_line[:width].ljust(width), "├" + "─" * inner_width + "┤"]
+        lines: List[str] = [_header_line(width, len(flat_records)), f"│{summary_line[: inner_width].ljust(inner_width)}│", "├" + "─" * inner_width + "┤"]
         spans: List[Tuple[int, int, int, str]] = []
         if listen_width:
             spans.append((1, 1, listen_width, "green"))
@@ -214,18 +220,20 @@ class BladesWidget:
             if remaining_lines <= 0:
                 break
             groups_left = len(grouped_items) - index
-            max_content_lines = max(1, min(4, remaining_lines - (groups_left - 1) * 2 - 2))
+            max_content_lines = max(1, min(3, remaining_lines - (groups_left - 1) * 2 - 2))
             card = self._render_card(name, records, width, max_content_lines)
             if len(card) > remaining_lines:
                 card = card[:remaining_lines]
             lines.extend(card)
             remaining_lines -= len(card)
             if remaining_lines > 0 and index != len(grouped_items) - 1:
-                lines.append(" " * width)
+                lines.append("·" * width)
+                spans.append((len(lines) - 1, 0, width, "bright_black"))
                 remaining_lines -= 1
 
         while remaining_lines > 0:
-            lines.append(" " * width)
+            lines.append("·" * width)
+            spans.append((len(lines) - 1, 0, width, "bright_black"))
             remaining_lines -= 1
 
         lines.append("└" + "─" * inner_width + "┘")
@@ -238,21 +246,31 @@ class BladesWidget:
         active_count = sum(1 for record in sorted_records if record.socket.state in _ACTIVE_STATES)
 
         tokens = [_record_token(record) for record in sorted_records]
+        content_width = max(0, width - 4)
+        port_lines = _wrap_tokens(tokens, content_width)
+        meta_bits = []
         if listen_count:
-            tokens.append(f"{listen_count} listening")
+            meta_bits.append(f"{listen_count} listening")
         if active_count:
-            tokens.append(f"active conns: {active_count}")
+            meta_bits.append(f"active conns: {active_count}")
         if all(record.process is None for record in sorted_records):
-            tokens.append("unresolved")
+            meta_bits.append("unresolved")
+        meta_line = " · ".join(meta_bits)
 
-        content_lines = _limit_lines(tokens, width - 4 if width >= 4 else width, max_content_lines)
-        while len(content_lines) < max_content_lines:
-            content_lines.append("")
+        content_lines: List[str] = []
+        if port_lines:
+            content_lines.append(port_lines[0])
+        if meta_line:
+            content_lines.append(meta_line[:content_width])
+        for line in port_lines[1:]:
+            if len(content_lines) >= max_content_lines:
+                break
+            content_lines.append(line)
 
         lines = [_title_line(name, status, width)]
         for line in content_lines[:max_content_lines]:
-            line = line[: max(0, width - 4)]
-            lines.append(f"│ {line.ljust(max(0, width - 4))} │"[:width].ljust(width))
+            line = line[:content_width]
+            lines.append(f"│ {line.ljust(content_width)} │"[:width].ljust(width))
         lines.append(_bottom_line(width))
         return lines
 
