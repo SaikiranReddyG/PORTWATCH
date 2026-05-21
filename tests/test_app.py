@@ -44,7 +44,7 @@ def test_blades_widget_empty_records_shows_loading():
 def test_blades_widget_pin_count_matches_records():
     records = [_record(i) for i in range(10000, 10010)]
     c = BladesWidget(_grouped(*records))
-    s = str(c.render(120, 40))
+    s = str(c.render(180, 40))
     for port in range(10000, 10010):
         assert str(port) in s
     assert "portwatch" in s
