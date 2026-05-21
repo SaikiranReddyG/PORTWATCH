@@ -24,17 +24,35 @@ def _safe_getuser() -> str:
         return "unknown"
 
 
+def _copy_grouped_records(records_by_process: Mapping[str, Sequence[PortRecord]]) -> Dict[str, List[PortRecord]]:
+    grouped: Dict[str, List[PortRecord]] = {}
+    for name, records in records_by_process.items():
+        grouped[name] = list(records)
+    return grouped
+
+
 def _bar_segment(count: int, total: int, width: int) -> int:
     if total <= 0 or width <= 0:
         return 0
     return max(0, min(width, round((count / total) * width)))
 
 
-def _copy_grouped_records(records_by_process: Mapping[str, Sequence[PortRecord]]) -> Dict[str, List[PortRecord]]:
-    grouped: Dict[str, List[PortRecord]] = {}
-    for name, records in records_by_process.items():
-        grouped[name] = list(records)
-    return grouped
+def _compose_text(lines: Sequence[str], spans: Sequence[Tuple[int, int, int, str]]) -> Text:
+    plain = "\n".join(lines)
+    text = Text(plain)
+    offsets: List[int] = []
+    offset = 0
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line) + 1
+    for row, col, length, style in spans:
+        if row >= len(offsets) or length <= 0:
+            continue
+        start = offsets[row] + col
+        end = min(len(plain), start + length)
+        if start < end:
+            text.stylize(style, start, end)
+    return text
 
 
 def _record_symbol(record: PortRecord) -> str:
@@ -52,7 +70,7 @@ def _record_token(record: PortRecord) -> str:
         remote = record.socket.remote_ip
         if record.socket.remote_port:
             remote = f"{remote}:{record.socket.remote_port}"
-        return f"{symbol} {port}→{remote}"
+        return f"{symbol} {port} → {remote}"
     return f"{symbol} {port}"
 
 
@@ -79,6 +97,18 @@ def _wrap_tokens(tokens: Sequence[str], width: int) -> List[str]:
     return lines or [""]
 
 
+def _limit_lines(tokens: Sequence[str], width: int, max_lines: int) -> List[str]:
+    wrapped = _wrap_tokens(tokens, width)
+    if max_lines <= 0:
+        return []
+    if len(wrapped) <= max_lines:
+        return wrapped
+    kept = wrapped[:max_lines]
+    overflow = len(wrapped) - max_lines
+    kept[-1] = f"{kept[-1]}  … +{overflow} more"[:width]
+    return kept
+
+
 def _fit_between(left: str, right: str, width: int, fill: str = " ") -> str:
     if width <= 0:
         return ""
@@ -89,12 +119,6 @@ def _fit_between(left: str, right: str, width: int, fill: str = " ") -> str:
         merged = (left + " " + right).strip()
         return merged[:width].ljust(width, fill)
     return f"{left}{fill * remaining}{right}"
-
-
-def _frame_line(content: str, width: int) -> str:
-    if width <= 0:
-        return ""
-    return f"│{content.ljust(width)}│"
 
 
 def _title_line(name: str, status: str, width: int) -> str:
@@ -109,8 +133,7 @@ def _title_line(name: str, status: str, width: int) -> str:
         name = name[:available]
         prefix = f"┌── {name} "
     fill = max(2, width - len(prefix) - len(suffix))
-    line = f"{prefix}{'─' * fill}{suffix}"
-    return line[:width].ljust(width)
+    return (f"{prefix}{'─' * fill}{suffix}")[:width].ljust(width)
 
 
 def _bottom_line(width: int) -> str:
@@ -125,12 +148,12 @@ def _group_status(name: str, records: Sequence[PortRecord]) -> str:
     if name.startswith("???") or all(record.process is None for record in records):
         return "WARN"
     states = {record.socket.state for record in records}
+    if states and states <= _DEAD_STATES:
+        return "DEAD"
     if "LISTEN" in states:
         return "RUN"
     if states & _ACTIVE_STATES:
         return "BUSY"
-    if states and states <= _DEAD_STATES:
-        return "DEAD"
     return "WARN"
 
 
@@ -161,59 +184,56 @@ class BladesWidget:
             return self._loading_screen(width, height)
 
         inner_width = max(0, width - 2)
-        content_width = max(0, inner_width - 4)
+        content_width = max(0, inner_width - 2)
 
         n_listen = sum(1 for record in flat_records if record.socket.state == "LISTEN")
         n_est = sum(1 for record in flat_records if record.socket.state in _ACTIVE_STATES)
         n_other = len(flat_records) - n_listen - n_est
         user = _safe_getuser()
 
-        bar_width = max(8, content_width - 18)
+        bar_width = max(8, min(content_width - 14, inner_width - 22))
         listen_width = _bar_segment(n_listen, len(flat_records), bar_width)
         est_width = _bar_segment(n_est, len(flat_records), bar_width)
         other_width = max(0, bar_width - listen_width - est_width)
         bar = "█" * listen_width + "▒" * est_width + "░" * other_width
-        summary_line = _fit_between(
-            bar.ljust(bar_width, "░"),
-            f"{n_listen} LISTEN  {n_est} EST  {n_other} OTHER",
-            inner_width,
-        )
+        summary_line = "│" + _fit_between(bar.ljust(bar_width, "░"), f"{n_listen} LISTEN  {n_est} EST  {n_other} OTHER", inner_width - 2) + "│"
 
-        body: List[str] = []
-        body.append(_fit_between(" portwatch ", f"{len(flat_records)} sockets ", inner_width, fill="─"))
-        body.append(summary_line)
-        body.append("─" * inner_width)
+        title = f"┌─ portwatch ──────────────────────────────────── {len(flat_records)} sockets ┐"
+        title = title[:width].ljust(width)
+        lines: List[str] = [title, summary_line[:width].ljust(width), "├" + "─" * inner_width + "┤"]
+        spans: List[Tuple[int, int, int, str]] = []
+        if listen_width:
+            spans.append((1, 1, listen_width, "green"))
+        if est_width:
+            spans.append((1, 1 + listen_width, est_width, "cyan"))
+        if other_width:
+            spans.append((1, 1 + listen_width + est_width, other_width, "bright_black"))
 
-        remaining_groups = len(grouped_items)
+        remaining_lines = max(0, height - len(lines) - 1)
         for index, (name, records) in enumerate(grouped_items):
-            if remaining_groups <= 0:
+            if remaining_lines <= 0:
                 break
-            remaining_groups -= 1
-            card = self._render_card(name, records, inner_width)
-            needed = len(card) + (1 if body else 0)
-            if len(body) + needed > max(0, height - 2):
-                if len(body) < max(0, height - 3):
-                    body.append(_frame_line(f"… +{remaining_groups + 1} groups more".ljust(content_width), inner_width))
-                break
-            if body and body[-1].strip():
-                body.append(" " * inner_width)
-            body.extend(card)
+            groups_left = len(grouped_items) - index
+            max_content_lines = max(1, min(4, remaining_lines - (groups_left - 1) * 2 - 2))
+            card = self._render_card(name, records, width, max_content_lines)
+            if len(card) > remaining_lines:
+                card = card[:remaining_lines]
+            lines.extend(card)
+            remaining_lines -= len(card)
+            if remaining_lines > 0 and index != len(grouped_items) - 1:
+                lines.append(" " * width)
+                remaining_lines -= 1
 
-        if len(body) < max(0, height - 2):
-            body.append(_frame_line(f" running as: {user}".ljust(content_width), inner_width))
+        while remaining_lines > 0:
+            lines.append(" " * width)
+            remaining_lines -= 1
 
-        while len(body) < max(0, height - 2):
-            body.append(" " * inner_width)
-
-        body = body[: max(0, height - 2)]
-        lines = ["┌" + "─" * inner_width + "┐"]
-        lines.extend(_frame_line(line, inner_width) if line.strip() else _frame_line("".ljust(inner_width), inner_width) for line in body)
         lines.append("└" + "─" * inner_width + "┘")
-        return Text("\n".join(lines))
+        return _compose_text(lines[:height], spans)
 
-    def _render_card(self, name: str, records: Sequence[PortRecord], width: int) -> List[str]:
+    def _render_card(self, name: str, records: Sequence[PortRecord], width: int, max_content_lines: int) -> List[str]:
         status = _group_status(name, records)
-        sorted_records = sorted(records, key=lambda record: (record.socket.local_port, record.socket.state))
+        sorted_records = sorted(records, key=lambda record: (record.socket.local_port, record.socket.state, record.socket.remote_ip, record.socket.remote_port))
         listen_count = sum(1 for record in sorted_records if record.socket.state == "LISTEN")
         active_count = sum(1 for record in sorted_records if record.socket.state in _ACTIVE_STATES)
 
@@ -225,16 +245,14 @@ class BladesWidget:
         if all(record.process is None for record in sorted_records):
             tokens.append("unresolved")
 
-        text_width = max(0, width - 4)
-        content_lines = _wrap_tokens(tokens, text_width)
-        if len(content_lines) > 2:
-            overflow = len(content_lines) - 2
-            content_lines = content_lines[:2]
-            content_lines[-1] = f"{content_lines[-1]}  … +{overflow} more"[:text_width]
+        content_lines = _limit_lines(tokens, width - 4 if width >= 4 else width, max_content_lines)
+        while len(content_lines) < max_content_lines:
+            content_lines.append("")
 
         lines = [_title_line(name, status, width)]
-        for line in content_lines:
-            lines.append(f"│ {line.ljust(text_width)} │"[:width].ljust(width))
+        for line in content_lines[:max_content_lines]:
+            line = line[: max(0, width - 4)]
+            lines.append(f"│ {line.ljust(max(0, width - 4))} │"[:width].ljust(width))
         lines.append(_bottom_line(width))
         return lines
 

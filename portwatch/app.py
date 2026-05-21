@@ -70,6 +70,21 @@ def filter_records(records: Sequence[PortRecord], mode: FilterMode, query: str =
     return [record for record in records if _record_matches_filter(record, mode) and _record_matches_search(record, query)]
 
 
+def _record_rank(record: PortRecord) -> tuple:
+    state_rank = 0 if record.socket.state == "LISTEN" else 1 if record.socket.state == "ESTABLISHED" else 2
+    process_rank = 0 if record.process is not None else 1
+    remote_rank = 0 if record.socket.remote_port else 1
+    return (
+        state_rank,
+        process_rank,
+        remote_rank,
+        record.socket.protocol,
+        record.socket.local_ip,
+        record.socket.remote_ip,
+        record.socket.remote_port,
+    )
+
+
 def _process_group_name(record: PortRecord) -> str:
     if record.process is None:
         return "??? (unresolved)"
@@ -81,9 +96,22 @@ def _group_records_by_process_name(records: Sequence[PortRecord]) -> Dict[str, L
     grouped: Dict[str, List[PortRecord]] = {}
     for record in records:
         grouped.setdefault(_process_group_name(record), []).append(record)
-    for process_records in grouped.values():
-        process_records.sort(key=lambda record: (record.socket.local_port, record.socket.state, record.socket.remote_ip, record.socket.remote_port))
+    for process_name, process_records in list(grouped.items()):
+        best_by_port: Dict[int, PortRecord] = {}
+        for record in process_records:
+            port = record.socket.local_port
+            current = best_by_port.get(port)
+            if current is None or _record_rank(record) < _record_rank(current):
+                best_by_port[port] = record
+        grouped[process_name] = sorted(best_by_port.values(), key=lambda record: (record.socket.local_port, _record_rank(record)))
     return grouped
+
+
+def _flatten_grouped_records(grouped_records: Dict[str, List[PortRecord]]) -> List[PortRecord]:
+    flat: List[PortRecord] = []
+    for records in grouped_records.values():
+        flat.extend(records)
+    return flat
 
 
 @dataclass
@@ -213,8 +241,8 @@ class BladesDisplay(Static):
         if width <= 0 or height <= 0:
             return
         visible = filter_records(self._records, self._filter_mode, self._search_query)
-        self._slots = list(visible)
         self._grouped_records = _group_records_by_process_name(visible)
+        self._slots = _flatten_grouped_records(self._grouped_records)
         first_visible = self._first_visible_port()
         if first_visible is not None and (self._focus_port is None or not any(r is not None and r.socket.local_port == self._focus_port for r in self._slots)):
             self._focus_port = first_visible
@@ -438,7 +466,16 @@ class PortwatchApp(App):
         diff_text = self._last_diff_text if self._last_diff_text and (time.time() - self._last_diff_at) < max(0.1, self.poll_interval * 2) else ""
         filter_text = f"[filter: {self._filter_mode.value}]" if self._filter_mode is not FilterMode.ALL else ""
         message = self._status_message
-        return _format_status_line(__version__, len(self._current_snapshot), _timestr(), diff_text, filter_text, message)
+        if filter_text and message == filter_text:
+            message = ""
+        runtime = time.time() - self._stats.start_time
+        footer = f"running as: {getpass.getuser()} · uptime {int(runtime // 60)}m {int(runtime % 60)}s"
+        if message:
+            message = f"{message} · {footer}"
+        else:
+            message = footer
+        visible_count = len(_flatten_grouped_records(_group_records_by_process_name(filter_records(self._current_snapshot, self._filter_mode, self._search_query))))
+        return _format_status_line(__version__, visible_count, _timestr(), diff_text, filter_text, message)
 
     def _detail_renderable(self) -> RenderableType:
         record = self._current_focused_record()
@@ -490,7 +527,7 @@ class PortwatchApp(App):
 
     def action_cycle_filter(self) -> None:
         self._filter_mode = self._filter_mode.next()
-        self._status_message = f"[filter: {self._filter_mode.value}]" if self._filter_mode is not FilterMode.ALL else ""
+        self._status_message = ""
         self._refresh_widgets()
 
     def action_search(self) -> None:
