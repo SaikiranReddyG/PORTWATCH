@@ -37,3 +37,13 @@ pip-delete-this-directory.txt
 
 # Environment variables
 .env
+
+# Reports
+*REPORT*.md
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
